@@ -44,7 +44,7 @@ const client = new Client({
 });
 
 // ==========================================
-// 3. FUNZIONE HELPER API ROBLOX
+// 3. FUNZIONE HELPER API ROBLOX (CORRETTA)
 // ==========================================
 async function getRobloxUserInfo(username) {
   try {
@@ -53,16 +53,22 @@ async function getRobloxUserInfo(username) {
       excludeBannedUsers: false
     });
     
-    if (res.data.data && res.data.data.length > 0) {
+    if (res.data && res.data.data && res.data.data.length > 0) {
       const user = res.data.data[0];
-      const avatarRes = await axios.get(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=150x150&format=Png&isCircular=false`);
-      const avatarUrl = avatarRes.data.data[0]?.imageUrl || null;
+      let avatarUrl = null;
+
+      try {
+        const avatarRes = await axios.get(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=150x150&format=Png&isCircular=false`);
+        avatarUrl = avatarRes.data?.data?.[0]?.imageUrl || null;
+      } catch (err) {
+        console.warn(`Impossibile recuperare l'avatar per l'utente ID ${user.id}:`, err.message);
+      }
       
       return { id: user.id, name: user.name, displayName: user.displayName, avatarUrl };
     }
     return null;
   } catch (error) {
-    console.error('Errore durante la chiamata API Roblox:', error);
+    console.error('Errore durante la chiamata API Roblox:', error.message);
     return null;
   }
 }
@@ -71,7 +77,6 @@ async function getRobloxUserInfo(username) {
 // 4. REGISTRAZIONE COMANDI SLASH
 // ==========================================
 const commands = [
-  // SSU / SSD
   new SlashCommandBuilder()
     .setName('ssu')
     .setDescription('Avvia la sessione di gioco (Server Start Up)')
@@ -80,7 +85,6 @@ const commands = [
     .setName('ssd')
     .setDescription('Chiudi la sessione di gioco (Server Shut Down)'),
 
-  // Moderazione (Ban, Warn, Unban, Unwarn)
   new SlashCommandBuilder()
     .setName('ban')
     .setDescription('Banna un utente da Roblox')
@@ -102,7 +106,6 @@ const commands = [
     .addStringOption(opt => opt.setName('username').setDescription('Username Roblox').setRequired(true))
     .addStringOption(opt => opt.setName('motivo').setDescription('Motivo della rimozione').setRequired(true)),
 
-  // Roleplay (Arrestati, Multe)
   new SlashCommandBuilder()
     .setName('arresta')
     .setDescription('Registra l\'arresto di un utente Roblox')
@@ -116,7 +119,6 @@ const commands = [
     .addStringOption(opt => opt.setName('reati').setDescription('Motivazione/Reati').setRequired(true))
     .addNumberOption(opt => opt.setName('importo').setDescription('Importo della multa').setRequired(true)),
 
-  // Pannello Ticket
   new SlashCommandBuilder()
     .setName('setup-ticket')
     .setDescription('Invia il pannello dei ticket nel canale corrente')
@@ -137,7 +139,7 @@ client.once('ready', async () => {
       Routes.applicationCommands(client.user.id),
       { body: commands }
     );
-    console.log('Comandi slash registrati con successo in modo globale!');
+    console.log('Comandi slash registrati con successo!');
   } catch (err) {
     console.error('Errore nella registrazione dei comandi slash:', err);
   }
@@ -148,10 +150,8 @@ client.once('ready', async () => {
 // ==========================================
 client.on('interactionCreate', async interaction => {
   
-  // --- A. COMANDI SLASH ---
   if (interaction.isChatInputCommand()) {
     const { commandName, options, user, guild } = interaction;
-    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
 
     // SSU
     if (commandName === 'ssu') {
@@ -186,87 +186,106 @@ client.on('interactionCreate', async interaction => {
     // BAN, WARN, UNBAN, UNWARN
     if (['ban', 'warn', 'unban', 'unwarn'].includes(commandName)) {
       await interaction.deferReply({ ephemeral: true });
-      const username = options.getString('username');
-      const motivo = options.getString('motivo');
-      const robloxData = await getRobloxUserInfo(username);
 
-      if (!robloxData) {
-        return interaction.editReply({ content: `❌ Impossibile trovare l'utente Roblox \`${username}\`. Verificare che il nome sia corretto.` });
-      }
+      try {
+        const username = options.getString('username');
+        const motivo = options.getString('motivo');
+        const robloxData = await getRobloxUserInfo(username);
 
-      let color = 0x000000;
-      let title = '';
+        if (!robloxData) {
+          return interaction.editReply({ content: `❌ Impossibile trovare l'utente Roblox \`${username}\`. Verificare che il nome sia corretto.` });
+        }
 
-      if (commandName === 'ban') { color = 0x990000; title = '🔨 BAN ESEGUITO'; }
-      if (commandName === 'warn') { color = 0xf1c40f; title = '⚠️ WARN EMESSO'; }
-      if (commandName === 'unban') { color = 0x2ecc71; title = '🟢 UNBAN ESEGUITO'; }
-      if (commandName === 'unwarn') { color = 0x3498db; title = '🔵 UNWARN ESEGUITO'; }
+        let color = 0x000000;
+        let title = '';
 
-      const logEmbed = new EmbedBuilder()
-        .setTitle(title)
-        .setColor(color)
-        .addFields(
-          { name: 'Utente Roblox', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
-          { name: 'Motivazione', value: motivo, inline: true },
-          { name: 'Staffer', value: `<@${user.id}>`, inline: true }
-        )
-        .setTimestamp();
+        if (commandName === 'ban') { color = 0x990000; title = '🔨 BAN ESEGUITO'; }
+        if (commandName === 'warn') { color = 0xf1c40f; title = '⚠️ WARN EMESSO'; }
+        if (commandName === 'unban') { color = 0x2ecc71; title = '🟢 UNBAN ESEGUITO'; }
+        if (commandName === 'unwarn') { color = 0x3498db; title = '🔵 UNWARN ESEGUITO'; }
 
-      if (robloxData.avatarUrl) logEmbed.setThumbnail(robloxData.avatarUrl);
+        const logEmbed = new EmbedBuilder()
+          .setTitle(title)
+          .setColor(color)
+          .addFields(
+            { name: 'Utente Roblox', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
+            { name: 'Motivazione', value: motivo, inline: true },
+            { name: 'Staffer', value: `<@${user.id}>`, inline: true }
+          )
+          .setTimestamp();
 
-      if (['ban', 'warn'].includes(commandName)) {
-        logEmbed.addFields({ name: 'Note', value: 'Le sanzioni sono state registrate nel sistema del server.' });
-      }
+        if (robloxData.avatarUrl) logEmbed.setThumbnail(robloxData.avatarUrl);
 
-      if (logChannel) {
-        await logChannel.send({ embeds: [logEmbed] });
-        return interaction.editReply({ content: `✅ Registrato con successo nel canale log (<#${LOG_CHANNEL_ID}>)!` });
-      } else {
-        return interaction.editReply({ content: '❌ Canale di log non trovato. Verifica l\'ID nel codice.' });
+        if (['ban', 'warn'].includes(commandName)) {
+          logEmbed.addFields({ name: 'Note', value: 'Le sanzioni sono state registrate nel sistema del server.' });
+        }
+
+        // Recupero canale con fetch per evitare problemi di cache
+        const logChannel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+
+        if (logChannel) {
+          await logChannel.send({ embeds: [logEmbed] });
+          return interaction.editReply({ content: `✅ Sanzione registrata con successo nel canale log (<#${LOG_CHANNEL_ID}>)!` });
+        } else {
+          return interaction.editReply({ content: `❌ Errore: Il canale dei log (ID: \`${LOG_CHANNEL_ID}\`) non è stato trovato o il bot non ha i permessi per vederlo/scrivere.` });
+        }
+      } catch (err) {
+        console.error(`Errore nell'esecuzione del comando ${commandName}:`, err);
+        return interaction.editReply({ content: '❌ Si è verificato un errore imprevisto durante l\'elaborazione del comando.' });
       }
     }
 
     // ARRESTA & MULTA
     if (['arresta', 'multa'].includes(commandName)) {
       await interaction.deferReply({ ephemeral: true });
-      const username = options.getString('username');
-      const reati = options.getString('reati');
-      const robloxData = await getRobloxUserInfo(username);
 
-      if (!robloxData) {
-        return interaction.editReply({ content: `❌ Impossibile trovare l'utente Roblox \`${username}\`.` });
-      }
+      try {
+        const username = options.getString('username');
+        const reati = options.getString('reati');
+        const robloxData = await getRobloxUserInfo(username);
 
-      const logEmbed = new EmbedBuilder().setTimestamp();
-      if (robloxData.avatarUrl) logEmbed.setThumbnail(robloxData.avatarUrl);
+        if (!robloxData) {
+          return interaction.editReply({ content: `❌ Impossibile trovare l'utente Roblox \`${username}\`.` });
+        }
 
-      if (commandName === 'arresta') {
-        const tempo = options.getString('tempo');
-        logEmbed
-          .setTitle('⚖️ REGISTRO ARRESTI')
-          .setColor(0x34495e)
-          .addFields(
-            { name: 'Cittadino', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
-            { name: 'Tempo Detenzione', value: tempo, inline: true },
-            { name: 'Agente/Staffer', value: `<@${user.id}>`, inline: true },
-            { name: 'Reati Commessi', value: reati }
-          );
-      } else if (commandName === 'multa') {
-        const importo = options.getNumber('importo');
-        logEmbed
-          .setTitle('💳 VERBALE DI MULTA')
-          .setColor(0xe67e22)
-          .addFields(
-            { name: 'Cittadino', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
-            { name: 'Importo', value: `$${importo}`, inline: true },
-            { name: 'Ufficiale/Staffer', value: `<@${user.id}>`, inline: true },
-            { name: 'Motivo/Reati', value: reati }
-          );
-      }
+        const logEmbed = new EmbedBuilder().setTimestamp();
+        if (robloxData.avatarUrl) logEmbed.setThumbnail(robloxData.avatarUrl);
 
-      if (logChannel) {
-        await logChannel.send({ embeds: [logEmbed] });
-        return interaction.editReply({ content: `✅ Verbale inserito nel canale log (<#${LOG_CHANNEL_ID}>)!` });
+        if (commandName === 'arresta') {
+          const tempo = options.getString('tempo');
+          logEmbed
+            .setTitle('⚖️ REGISTRO ARRESTI')
+            .setColor(0x34495e)
+            .addFields(
+              { name: 'Cittadino', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
+              { name: 'Tempo Detenzione', value: tempo, inline: true },
+              { name: 'Agente/Staffer', value: `<@${user.id}>`, inline: true },
+              { name: 'Reati Commessi', value: reati }
+            );
+        } else if (commandName === 'multa') {
+          const importo = options.getNumber('importo');
+          logEmbed
+            .setTitle('💳 VERBALE DI MULTA')
+            .setColor(0xe67e22)
+            .addFields(
+              { name: 'Cittadino', value: `**${robloxData.displayName}** (@${robloxData.name})\nID: \`${robloxData.id}\``, inline: true },
+              { name: 'Importo', value: `$${importo}`, inline: true },
+              { name: 'Ufficiale/Staffer', value: `<@${user.id}>`, inline: true },
+              { name: 'Motivo/Reati', value: reati }
+            );
+        }
+
+        const logChannel = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+
+        if (logChannel) {
+          await logChannel.send({ embeds: [logEmbed] });
+          return interaction.editReply({ content: `✅ Verbale inserito nel canale log (<#${LOG_CHANNEL_ID}>)!` });
+        } else {
+          return interaction.editReply({ content: `❌ Errore: Il canale dei log (ID: \`${LOG_CHANNEL_ID}\`) non è stato trovato.` });
+        }
+      } catch (err) {
+        console.error(`Errore nell'esecuzione del comando ${commandName}:`, err);
+        return interaction.editReply({ content: '❌ Si è verificato un errore imprevisto durante l\'elaborazione del comando.' });
       }
     }
 
@@ -295,7 +314,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // --- B. GESTIONE SELEZIONE MENU TICKET ---
+  // GESTIONE TICKET (MENU)
   if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
     const { guild, member, values } = interaction;
     const categoryName = values[0].replace('ticket_', '').replace('_', ' ').toUpperCase();
@@ -326,12 +345,11 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply({ content: `✅ Il tuo ticket è stato aperto in: ${ticketChannel}`, ephemeral: true });
   }
 
-  // --- C. GESTIONE PULSANTI TICKET ---
+  // GESTIONE PULSANTI TICKET
   if (interaction.isButton()) {
     const { customId, member, channel } = interaction;
 
     if (['ticket_claim', 'ticket_release', 'ticket_close'].includes(customId)) {
-      // Verifica Ruolo Staff
       if (!member.roles.cache.has(STAFF_ROLE_ID)) {
         return interaction.reply({ content: '❌ Non hai il permesso per gestire questo ticket!', ephemeral: true });
       }
@@ -362,5 +380,4 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Avvio Bot con la variabile d'ambiente
 client.login(process.env.DISCORD_TOKEN);
